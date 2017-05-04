@@ -1,6 +1,15 @@
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <pthread.h>
+#include <sys/time.h>
 #include"string_p.h"
 
 #define AGENT "burning/1.0"
@@ -16,9 +25,12 @@ struct resp_header resp;
 
 void parse_url(char const *url,char *domain,int *port,char *file_name);
 void get_ip_addr(char const *domain,char *ip_addr);
-void send_request(char const *url,char const *domain,int *socket,int *port);
+void send_request(char const *url,char const *domain,int *re_socket,int port);
 void parse_response(int client_socket);
 struct resp_header get_resp_header(char const * response);
+void progressBar(long cur_size,long tot_size);
+void download(void *socket_d);
+
 void parse_url(char const *url,char *domain,int *port,char *file_name)
 {
     char *head[]={"http://","https://"};
@@ -71,22 +83,22 @@ void get_ip_addr(char const *domain,char *ip_addr)
         break;
     }
 }
-void send_request(char const *url,char const *domain,int *socket,int * port)
+void send_request(char const *url,char const *domain,int *re_socket,int port)
 {
     char header[2048];
     char ip_addr[16]={0};
     
-    sprintf(header,"GET %s HTTP/1.1\r\n" /
-            "Accept:*/*\r\n" /
-            "User-Agent:%s\r\n" /
-            "Host:%s\r\n" /
-            "Connection:close\r\n" /
+    sprintf(header,"GET %s HTTP/1.1\r\n" \
+            "Accept:text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\n"\
+            "User-Agent:%s\r\n" \
+            "Host:%s\r\n" \
+            "Connection:close\r\n" \
             "\r\n",url,AGENT,domain);
     
     get_ip_addr(domain, ip_addr);
-    
-    int client_socket = socket(AF_INET,SOCKET_STREAM,IPPROTO_TCP);
-    *socket=client_socket;
+    printf("IP:%s\n ",ip_addr);
+    int client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    *re_socket=client_socket;
     
     if(client_socket < 0)
     {
@@ -94,10 +106,10 @@ void send_request(char const *url,char const *domain,int *socket,int * port)
         exit(-1);
     }
     struct sockaddr_in addr;
-    memset(add,0,sizeof(addr));
+    memset(&addr,0,sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = inet_addr(ip_addr);
-    addr.sin_port = htons(*port);
+    addr.sin_port = htons(port);
     
     int res = connect(client_socket,(struct sockaddr *)&addr,sizeof(addr));
     if(res == -1)
@@ -132,7 +144,7 @@ void parse_response(int client_socket)
         strcat(response,buf);
         
         int sum=0,i;
-        i=strlen(response);
+        i=strlen(response) - 1;
         while(response[i] == '\r' || response[i] == '\n')
         {
             i--;
@@ -160,10 +172,57 @@ struct resp_header get_resp_header(char const * response)
     
     return resp;
 }
+void progressBar(long cur_size, long total_size)
+{
+    float percent = (float) cur_size / total_size;
+    const int numTotal = 50;
+    int numShow = (int)(numTotal * percent);
+    
+    if (numShow == 0)
+        numShow = 1;
+    
+    if (numShow > numTotal)
+        numShow = numTotal;
+    
+    char sign[51] = {0};
+    memset(sign, '*', numTotal);
+    
+    printf("\r%.2f%%\t[%-*.*s] %.2f/%.2fMB", percent * 100, numTotal, numShow, sign, cur_size / 1024.0 / 1024.0, total_size / 1024.0 / 1024.0);
+    fflush(stdout);
+    
+    if (numShow == numTotal)
+        printf("\n");
+}
+void download(void *socket_d)
+{
+    int client_socket = *(int *)socket_d;
+    int length = 0;
+    int MAX_SIZE = 2048;
+    int buf_len = MAX_SIZE;
+    int len;
+    
+    int fd = open(resp.file_name, O_CREAT | O_WRONLY, S_IRWXG | S_IRWXO | S_IRWXU);
+    if(fd < 0)
+    {
+        printf("Create file failed.\n");
+        exit(0);
+    }
+    char * buf = (char *)malloc(buf_len * sizeof(char));
+    while((len=read(client_socket,buf,buf_len))!=0 && length < resp.content_length)
+    {
+        write(fd,buf,len);
+        length+=len;
+        progressBar(length,resp.content_length);
+    }
+    if(length == resp.content_length)
+    {
+        printf("Download Successfull!\n");
+    }
+}
 int main(int argc,char const *argv[])
 {
     char url[2048]="127.0.0.1";
-    char domain[64]={0}
+    char domain[64]={0};
     int port=80,client_socket;
     char file_name[256]={0};
     
@@ -172,10 +231,21 @@ int main(int argc,char const *argv[])
         printf("Please input URL.\n");
         return 0;
     }else strcpy(url,argv[1]);
-    parse_url(url,domain,&client_socket,&port,file_name);
-    send_request();
+    
+    parse_url(url,domain,&port,file_name);
+    send_request(url,domain,&client_socket,port);
     parse_response(client_socket);
     strcpy(resp.file_name,file_name);
+
+    
+    printf("URL: %s\n", url);
+    printf("DOMAIN: %s\n", domain);
+    printf("PORT: %d\n", port);
+    printf("FILENAME: %s\n\n", file_name);
+    
+    pthread_t download_thread;
+    pthread_create(&download_thread, NULL, (void *)download, (void *) &client_socket);
+    pthread_join(download_thread, NULL);
     
     return 0;
 }
