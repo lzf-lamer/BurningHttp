@@ -10,7 +10,8 @@
 #include <sys/stat.h>
 #include <pthread.h>
 #include <sys/time.h>
-#include"string_p.h"
+#include "string_p.h"
+#include "w_algorithm.h"
 
 #define AGENT "burning/1.0"
 
@@ -23,6 +24,7 @@ struct resp_header
 };
 struct resp_header resp;
 
+void parse_thunder(char const * argv,char * url);
 void parse_url(char const *url,char *domain,int *port,char *file_name);
 void get_ip_addr(char const *domain,char *ip_addr);
 void send_request(char const *url,char const *domain,int *re_socket,int port);
@@ -31,6 +33,20 @@ struct resp_header get_resp_header(char const * response);
 void progressBar(long cur_size,long tot_size);
 void download(void *socket_d);
 
+
+void parse_thunder(char const * argv,char * url)
+{
+    int p=10;
+    char src[2048],dest[1024];
+    memset(src,0,sizeof(src));
+    strncpy(src,argv+p,strlen(argv)-p); //一直复制到字符串尾，已经复制了'\0'
+    
+    base64_decode(src,dest);
+    strncpy(url,dest+2,strlen(dest)-4);
+    url[strlen(dest)-4]='\0';
+    
+    //printf("%s\n",url);
+}
 void parse_url(char const *url,char *domain,int *port,char *file_name)
 {
     char *head[]={"http://","https://"};
@@ -230,7 +246,9 @@ int main(int argc,char const *argv[])
     {
         printf("Please input URL.\n");
         return 0;
-    }else strcpy(url,argv[1]);
+    }else if(strstr(argv[1],"thunder") != NULL) parse_thunder(argv[1],url);
+    else strcpy(url,argv[1]);
+    
     
     parse_url(url,domain,&port,file_name);
     send_request(url,domain,&client_socket,port);
