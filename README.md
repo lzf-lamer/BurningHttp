@@ -3,7 +3,7 @@
   最近在看C语言，找项目练手。看了看TinyHttpd，想着做一个客服端的下载器。正值DAC，IG夺冠，算是为了给大B神助威吧，就有了BurningHttp。
 ## 用法
   ### 下载
-      ‘https://github.com/lzf-lamer/BurningHttp.git’
+      'git clone https://github.com/lzf-lamer/BurningHttp.git’
   ### 编译
       ‘make'
   ### 使用
